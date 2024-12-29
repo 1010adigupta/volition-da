@@ -1,6 +1,7 @@
 use serde::{Serialize, Deserialize};
-use celestia_integration::poster::{create_namespace, CelestiaClient};
-#[derive(Serialize)]
+use celestia_integration::poster::CelestiaClient;
+
+#[derive(Debug, Serialize)]
 struct RollupBlock {
     transactions: Vec<String>,
     state_root: String,
@@ -9,15 +10,8 @@ struct RollupBlock {
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    // Create namespace for your rollup
-    let namespace = create_namespace("my-rollup-v1");
-    
     // Initialize Celestia client
-    let client = CelestiaClient::new(
-        "http://localhost:26658".to_string(),
-        namespace,
-        "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJBbGxvdyI6WyJwdWJsaWMiLCJyZWFkIiwid3JpdGUiLCJhZG1pbiJdLCJOb25jZSI6IkZaL0hNZFU0S2pTcnFYQTg5THMyaURUdDRkb0xjU1dIcjk5WEV5ajJnalU9IiwiRXhwaXJlc0F0IjoiMDAwMS0wMS0wMVQwMDowMDowMFoifQ.gAZ3VQ7lXL6zsfq0rJtTYJh2yWExI_EYNJ5YnwVRb3o".to_string(),
-    );
+    let client = CelestiaClient::new().await?;
 
     // Create example block data
     let block = RollupBlock {
@@ -25,6 +19,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         state_root: "0x123...".to_string(),
         block_number: 1,
     };
+
+    println!("Submitting rollup block: {:?}", block);
 
     // Serialize block to bytes
     let block_data = serde_json::to_vec(&block)?;
@@ -36,6 +32,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             println!("Celestia height: {}", span.height);
             println!("Start share index: {}", span.start_index);
             println!("Number of shares: {}", span.data_len);
+
+            // Verify we can retrieve the data
+            println!("\nVerifying data retrieval...");
+            let namespace_data = client.get_shares_by_height(span.height).await?;
+            if !namespace_data.rows.is_empty() {
+                println!("Successfully retrieved namespace data");
+                println!("Number of rows: {}", namespace_data.rows.len());
+            } else {
+                println!("No data found in namespace");
+            }
         }
         Err(e) => {
             eprintln!("Failed to submit block: {}", e);

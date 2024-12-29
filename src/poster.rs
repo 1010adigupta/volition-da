@@ -1,14 +1,7 @@
-// src/celestia_client.rs
-use reqwest::{Client, Error as ReqwestError};
-use serde::{Deserialize, Serialize};
-use serde_json::json;
-use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
-
-#[derive(Debug, Serialize, Deserialize)]
-pub struct Namespace {
-    pub version: u8,
-    pub id: [u8; 28],
-}
+// src/poster.rs
+use celestia_rpc::{BlobClient, Client, HeaderClient, ShareClient};
+use celestia_types::{nmt::Namespace, Blob, TxConfig, consts::appconsts, row_namespace_data::NamespaceData};
+use serde::{Serialize, Deserialize};
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct SequenceSpan {
@@ -17,100 +10,74 @@ pub struct SequenceSpan {
     pub data_len: u64,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
-struct PfbResponse {
-    height: u64,
-    txhash: String,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-struct SharesResponse {
-    shares: Vec<String>,
-    height: u64,
-    start_share: u64,
-    end_share: u64,
-}
-
 pub struct CelestiaClient {
     client: Client,
-    endpoint: String,
-    namespace_id: Namespace,
-    auth_token: String,
+    namespace: Namespace,
 }
 
 impl CelestiaClient {
-    pub fn new(endpoint: String, namespace_id: Namespace, auth_token: String) -> Self {
-        Self {
-            client: Client::new(),
-            endpoint,
-            namespace_id,
-            auth_token,
-        }
+    pub async fn new() -> Result<Self, Box<dyn std::error::Error>> {
+        let node_url = "ws://localhost:26658";
+        let auth_token = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJBbGxvdyI6WyJwdWJsaWMiLCJyZWFkIiwid3JpdGUiLCJhZG1pbiJdLCJOb25jZSI6IkZaL0hNZFU0S2pTcnFYQTg5THMyaURUdDRkb0xjU1dIcjk5WEV5ajJnalU9IiwiRXhwaXJlc0F0IjoiMDAwMS0wMS0wMVQwMDowMDowMFoifQ.gAZ3VQ7lXL6zsfq0rJtTYJh2yWExI_EYNJ5YnwVRb3o";
+
+        let client = Client::new(node_url, Some(auth_token)).await?;
+        let namespace = Namespace::new_v0(&[0xDE, 0xAF, 0xBE, 0xEF])?;
+
+        Ok(Self { client, namespace })
     }
 
     pub async fn submit_pfb(&self, data: Vec<u8>) -> Result<SequenceSpan, Box<dyn std::error::Error>> {
-        // Convert data to base64
-        let data_base64 = BASE64.encode(&data);
+        let blob = Blob::new(
+            self.namespace,
+            data,
+            appconsts::AppVersion::V2,
+        )?;
+
+        let tx_config = TxConfig::default();
+        let height = self.client.blob_submit(&[blob.clone()], tx_config).await?;
         
-        // Convert namespace ID to base64
-        let namespace_base64 = BASE64.encode(&self.namespace_id.id);
-
-        // Prepare request body
-        let body = json!({
-            "namespace_id": namespace_base64,
-            "data": data_base64,
-            "gas_limit": 180000,
-            "fee": 2000, // Adjust fee as needed
-        });
-
-        // Submit PFB transaction
-        let response = self.client
-            .post(format!("{}/submit_pfb", self.endpoint))
-            .header("Authorization", format!("Bearer {}", self.auth_token))
-            .json(&body)
-            .send()
-            .await?;
-
-        println!("Response status: {}", response.status());
-        let pfb_result: PfbResponse = response.json().await?;
-        println!("Response body: {:?}", pfb_result);
-
-        // Get share range for the transaction
-        let shares = self.get_shares_by_tx(pfb_result.txhash).await?;
-
+        // Get namespace data to find start index
+        let header = self.client.header_get_by_height(height).await?;
+        let namespace_data = self.client.share_get_namespace_data(&header, self.namespace).await?;
+        
+        let (start_index, total_shares) = calculate_share_range(&namespace_data);
+        
         Ok(SequenceSpan {
-            height: shares.height,
-            start_index: shares.start_share,
-            data_len: shares.end_share - shares.start_share,
+            height,
+            start_index,
+            data_len: total_shares,
         })
     }
 
-    async fn get_shares_by_tx(&self, txhash: String) -> Result<SharesResponse, Box<dyn std::error::Error>> {
-        // Wait for transaction to be included in a block
-        tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
-
-        let response = self.client
-            .get(format!("{}/namespaced_shares/{}/{}", self.endpoint, BASE64.encode(&self.namespace_id.id), txhash))
-            .header("Authorization", format!("Bearer {}", self.auth_token))
-            .send()
-            .await?;
-
-        let shares: SharesResponse = response.json().await?;
-        Ok(shares)
+    pub async fn get_shares_by_height(&self, height: u64) -> Result<NamespaceData, Box<dyn std::error::Error>> {
+        let header = self.client.header_get_by_height(height).await?;
+        let namespace_data = self.client.share_get_namespace_data(&header, self.namespace).await?;
+        Ok(namespace_data)
     }
 }
 
-// Helper function to create a namespace ID from a string
-pub fn create_namespace(input: &str) -> Namespace {
-    let mut id = [0u8; 28];
-    let bytes = input.as_bytes();
-    let len = std::cmp::min(bytes.len(), 28);
-    id[..len].copy_from_slice(&bytes[..len]);
-    
-    Namespace {
-        version: 0,
-        id,
+fn calculate_share_range(namespace_data: &NamespaceData) -> (u64, u64) {
+    if namespace_data.rows.is_empty() {
+        return (0, 0);
     }
+
+    let mut start_index = u64::MAX;
+    let mut total_shares = 0u64;
+
+    for row in &namespace_data.rows {
+        if !row.shares.is_empty() {
+            let absolute_index = row.proof.start_idx() as u64;
+            start_index = start_index.min(absolute_index);
+            total_shares += row.shares.len() as u64;
+        }
+    }
+
+    if start_index == u64::MAX {
+        start_index = 0;
+        total_shares = 0;
+    }
+
+    (start_index, total_shares)
 }
 
 #[cfg(test)]
@@ -118,16 +85,20 @@ mod tests {
     use super::*;
 
     #[tokio::test]
-    async fn test_submit_pfb() {
-        let namespace = create_namespace("test-namespace");
-        let client = CelestiaClient::new(
-            "http://localhost:26659".to_string(),
-            namespace,
-            "test-token".to_string(),
-        );
+    async fn test_submit_pfb() -> Result<(), Box<dyn std::error::Error>> {
+        let client = CelestiaClient::new().await?;
 
-        let test_data = b"Test data".to_vec();
-        let result = client.submit_pfb(test_data).await;
-        assert!(result.is_ok());
+        let test_data = b"Hello Celestia!".to_vec();
+        let span = client.submit_pfb(test_data).await?;
+        
+        println!("Block submitted at height: {}", span.height);
+        println!("Start index: {}", span.start_index);
+        println!("Total shares: {}", span.data_len);
+        
+        // Verify we can retrieve the data
+        let namespace_data = client.get_shares_by_height(span.height).await?;
+        assert!(!namespace_data.rows.is_empty(), "Should have retrieved shares");
+        
+        Ok(())
     }
 }
