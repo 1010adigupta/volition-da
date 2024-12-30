@@ -3,7 +3,7 @@ use celestia_types::{nmt::Namespace, Blob, TxConfig, consts::appconsts, row_name
 use tokio;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-struct CelestiaTest {
+pub struct CelestiaTest {
     client: Client,
     namespace: Namespace,
 }
