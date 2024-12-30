@@ -7,3 +7,6 @@
 [submodule "celestia_settlement_contract/lib/openzeppelin-contracts"]
 	path = celestia_settlement_contract/lib/openzeppelin-contracts
 	url = https://github.com/OpenZeppelin/openzeppelin-contracts
+[submodule "celestia_settlement_contract/lib/blobstream-contracts"]
+	path = celestia_settlement_contract/lib/blobstream-contracts
+	url = https://github.com/celestiaorg/blobstream-contracts
