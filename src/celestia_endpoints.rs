@@ -9,7 +9,7 @@ pub struct CelestiaTest {
 }
 
 impl CelestiaTest {
-    async fn new() -> Result<Self, Box<dyn std::error::Error>> {
+    pub async fn new() -> Result<Self, Box<dyn std::error::Error>> {
         let node_url = "ws://localhost:26658";
         let auth_token = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJBbGxvdyI6WyJwdWJsaWMiLCJyZWFkIiwid3JpdGUiLCJhZG1pbiJdLCJOb25jZSI6IkZaL0hNZFU0S2pTcnFYQTg5THMyaURUdDRkb0xjU1dIcjk5WEV5ajJnalU9IiwiRXhwaXJlc0F0IjoiMDAwMS0wMS0wMVQwMDowMDowMFoifQ.gAZ3VQ7lXL6zsfq0rJtTYJh2yWExI_EYNJ5YnwVRb3o";
 
@@ -19,7 +19,7 @@ impl CelestiaTest {
         Ok(Self { client, namespace })
     }
 
-    async fn test_blob_submit(&self) -> Result<u64, Box<dyn std::error::Error>> {
+    pub async fn test_blob_submit(&self) -> Result<u64, Box<dyn std::error::Error>> {
         let timestamp = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap()

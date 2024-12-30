@@ -1,6 +1,9 @@
 use serde::{Serialize, Deserialize};
-use celestia_integration::poster::CelestiaClient;
+mod celestia_endpoints;
+mod celestia_prover;
+mod poster;
 
+use poster::CelestiaClient;
 #[derive(Debug, Serialize)]
 struct RollupBlock {
     transactions: Vec<String>,

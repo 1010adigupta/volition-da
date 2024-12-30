@@ -1,11 +1,17 @@
 use celestia_rpc::{BlobClient, Client, HeaderClient, ShareClient};
 use celestia_types::{
-    blob::Blob, header::ExtendedHeader, nmt::Namespace, row_namespace_data::NamespaceData,
-    share::Share,
+    blob::Blob,
+    nmt::{Namespace, NamespaceProof, NamespacedSha2Hasher, NS_SIZE},
+    row_namespace_data::NamespaceData,
+    ExtendedHeader,
+    hash::Hash,
+    TxConfig,
+    consts::appconsts
 };
+use nmt_rs::nmt_proof::NamespaceProof as NmtNamespaceProof;
 use serde::{Deserialize, Serialize};
 use std::error::Error;
-use celestia_rpc::CelestiaTest;
+use std::time::{SystemTime, UNIX_EPOCH};
 // Structures to match the contract's requirements
 #[derive(Debug, Serialize, Deserialize)]
 struct SharesProof {
@@ -48,32 +54,32 @@ impl CelestiaProver {
         Ok(Self { client, namespace })
     }
 
-    // Get shares proof from namespace data
     async fn get_shares_proof(
         &self,
         height: u64,
     ) -> Result<(SharesProof, u64, u64), Box<dyn Error>> {
         // Get the header for this height
         let header = self.client.header_get_by_height(height).await?;
-
+    
         // Get namespace data
         let namespace_data = self
             .client
             .share_get_namespace_data(&header, self.namespace)
             .await?;
-
+    
         // Extract row proofs and calculate indices
         let mut row_proofs = Vec::new();
         for row in &namespace_data.rows {
             if !row.shares.is_empty() {
-                // Convert the proof to bytes
-                row_proofs.push(row.proof.to_bytes()?);
+                // Serialize the proof directly to bytes
+                let proof_bytes = serde_json::to_vec(&row.proof)?;
+                row_proofs.push(proof_bytes);
             }
         }
-
+    
         // Calculate start_index and data_len
         let (start_index, data_len) = calculate_share_range(&namespace_data);
-
+    
         Ok((SharesProof { row_proofs }, start_index, data_len))
     }
 
@@ -93,26 +99,40 @@ impl CelestiaProver {
     // Get binary Merkle proof
     async fn get_merkle_proof(&self, height: u64) -> Result<BinaryMerkleProof, Box<dyn Error>> {
         let header = self.client.header_get_by_height(height).await?;
-
-        // Get commitment for the namespace
-        let blobs = self.client.blob_get_all(height, &[self.namespace]).await?;
-        let commitment = blobs
-            .unwrap_or_default()
-            .first()
-            .ok_or("No blob found")?
-            .commitment
-            .clone();
-
-        // Get proof for the commitment
-        let proof = self
-            .client
-            .blob_get_proof(height, self.namespace, commitment)
+        
+        let namespace_data = self.client
+            .share_get_namespace_data(&header, self.namespace)
             .await?;
-
-        Ok(BinaryMerkleProof {
-            siblings: proof.proof.siblings.into_iter().map(|s| s.into()).collect(),
-            path: proof.proof.path,
-        })
+    
+        if namespace_data.rows.is_empty() {
+            return Err("No data found for namespace".into());
+        }
+    
+        // Get the first valid row's proof
+        let first_proof = namespace_data.rows.iter()
+            .find(|row| !row.shares.is_empty())
+            .ok_or("No valid proofs found")?
+            .proof
+            .clone();
+    
+        // Get the inner proof
+        let nmt_proof = first_proof.into_inner();
+    
+        // Extract siblings and path based on the type of proof
+        match nmt_proof {
+            NmtNamespaceProof::PresenceProof { proof, .. } => {
+                Ok(BinaryMerkleProof {
+                    siblings: proof.siblings.into_iter().map(|s| s.hash()).collect(),
+                    path: proof.range.into_iter().map(|idx| idx % 2 == 1).collect(),
+                })
+            },
+            NmtNamespaceProof::AbsenceProof { proof, .. } => {
+                Ok(BinaryMerkleProof {
+                    siblings: proof.siblings.into_iter().map(|s| s.hash()).collect(),
+                    path: proof.range.into_iter().map(|idx| idx % 2 == 1).collect(),
+                })
+            }
+        }
     }
 
     // Main function to prepare all verification data
@@ -138,6 +158,28 @@ impl CelestiaProver {
             start_index,
             data_len,
         })
+    }
+
+    pub async fn test_blob_submit(&self) -> Result<u64, Box<dyn std::error::Error>> {
+        let timestamp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+        
+        let message = format!("Hello Celestians! Timestamp: {}", timestamp);
+        println!("Preparing to submit message: {}", message);
+        
+        let blob = Blob::new(
+            self.namespace,
+            message.as_bytes().to_vec(),
+            appconsts::AppVersion::V2,
+        )?;
+    
+        let tx_config = TxConfig::default();
+        let height = self.client.blob_submit(&[blob.clone()], tx_config).await?;
+        
+        println!("Successfully submitted blob at height: {}", height);
+        Ok(height)
     }
 }
 
@@ -172,15 +214,12 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let node_url = "ws://localhost:26658";
     let auth_token = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJBbGxvdyI6WyJwdWJsaWMiLCJyZWFkIiwid3JpdGUiLCJhZG1pbiJdLCJOb25jZSI6IkZaL0hNZFU0S2pTcnFYQTg5THMyaURUdDRkb0xjU1dIcjk5WEV5ajJnalU9IiwiRXhwaXJlc0F0IjoiMDAwMS0wMS0wMVQwMDowMDowMFoifQ.gAZ3VQ7lXL6zsfq0rJtTYJh2yWExI_EYNJ5YnwVRb3o";
     let namespace = Namespace::new_v0(&[0xDE, 0xAF, 0xBE, 0xEF])?;
-    let test = CelestiaTest::new().await?;
-    
-    // Submit a blob and get its height
-    let height = test.test_blob_submit().await?;
+    println!("Submitting blob and getting height.....");
 
     let prover = CelestiaProver::new(node_url, auth_token, namespace).await?;
 
-    // Get the block height where your data was submitted
-    let height = 1000; // Example height
+    // Submit a blob and get its height
+    let height = prover.test_blob_submit().await?;
 
     // Get all verification data
     let verification_data = prover.prepare_verification_data(height).await?;
@@ -188,6 +227,9 @@ async fn main() -> Result<(), Box<dyn Error>> {
     println!("Verification data prepared successfully!");
     println!("Start index: {}", verification_data.start_index);
     println!("Data length: {}", verification_data.data_len);
+    println!("Data root: {:?}", verification_data.data_root_tuple.data_root);
+    println!("Shares proof: {:?}", verification_data.shares_proof);
+    println!("Binary proof: {:?}", verification_data.binary_proof);
 
     Ok(())
 }

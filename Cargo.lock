@@ -398,6 +398,7 @@ dependencies = [
  "base64 0.21.7",
  "celestia-rpc",
  "celestia-types",
+ "nmt-rs",
  "reqwest",
  "serde",
  "serde_json",
