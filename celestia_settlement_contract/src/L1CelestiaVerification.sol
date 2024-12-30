@@ -56,8 +56,7 @@ contract ZKRollupSettlement {
         // 2. Verify data inclusion using DAVerifier
         (bool valid, DAVerifier.ErrorCodes err) = DAVerifier.verifySharesToDataRootTupleRoot(
             blobstream,
-            sharesProof,
-            tuple.dataRoot
+            sharesProof
         );
         require(valid, "Invalid DA proof");
         
@@ -114,9 +113,12 @@ contract ZKRollupSettlement {
         uint64 dataLen,
         SharesProof calldata sharesProof
     ) internal pure returns (bool) {
-        uint256 squareSize = DAVerifier.computeSquareSizeFromRowProof(sharesProof.rowProofs[0]);
-        uint256 maxIndex = 4 * squareSize;
+        (uint256 squareSize, DAVerifier.ErrorCodes err) = DAVerifier.computeSquareSizeFromRowProof(sharesProof.rowProofs[0]);
+        if (err != DAVerifier.ErrorCodes.NoError) {
+            return false;
+        }
         
+        uint256 maxIndex = 4 * squareSize;
         return startIndex + dataLen <= maxIndex;
     }
 
