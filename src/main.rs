@@ -2,7 +2,7 @@ use serde::{Serialize, Deserialize};
 mod celestia_endpoints;
 mod celestia_prover;
 mod poster;
-
+mod settlement_verification;
 use poster::CelestiaClient;
 #[derive(Debug, Serialize)]
 struct RollupBlock {

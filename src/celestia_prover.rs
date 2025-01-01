@@ -14,32 +14,32 @@ use std::error::Error;
 use std::time::{SystemTime, UNIX_EPOCH};
 // Structures to match the contract's requirements
 #[derive(Debug, Serialize, Deserialize)]
-struct SharesProof {
-    row_proofs: Vec<Vec<u8>>,
+pub struct SharesProof {
+    pub row_proofs: Vec<Vec<u8>>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
-struct DataRootTuple {
-    height: u64,
-    data_root: [u8; 32],
+pub struct DataRootTuple {
+    pub height: u64,
+    pub data_root: [u8; 32],
 }
 
 #[derive(Debug, Serialize, Deserialize)]
-struct BinaryMerkleProof {
-    siblings: Vec<[u8; 32]>,
-    path: Vec<bool>,
+pub struct BinaryMerkleProof {
+    pub siblings: Vec<[u8; 32]>,
+    pub path: Vec<bool>,
 }
 
 #[derive(Debug)]
-struct VerificationData {
-    shares_proof: SharesProof,
-    data_root_tuple: DataRootTuple,
-    binary_proof: BinaryMerkleProof,
-    start_index: u64,
-    data_len: u64,
+pub struct VerificationData {
+    pub shares_proof: SharesProof,
+    pub data_root_tuple: DataRootTuple,
+    pub binary_proof: BinaryMerkleProof,
+    pub start_index: u64,
+    pub data_len: u64,
 }
 
-struct CelestiaProver {
+pub struct CelestiaProver {
     client: Client,
     namespace: Namespace,
 }
