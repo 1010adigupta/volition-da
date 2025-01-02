@@ -12,12 +12,19 @@ serde_json = "1.0"
 tokio = { version = "1.0", features = ["full"] }
 base64 = "0.21"
 nmt-rs = "0.2.3"
-alloy-primitives = "0.8.15"
-alloy-sol-types = "0.8.15"
-alloy-provider = "0.4.2"
+alloy = { version = "0.9.1", features = ["full"] }
 ethers-core = "2.0.14"
+alloy-sol-types = "0.8.15"
+anyhow = "1.0.95"
+alloy-provider = "0.9.1"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+alloy-rpc-types = "0.9.1"
 
+# [[bin]]
+# name = "celestia_prover"
+# path = "src/celestia_prover.rs"
 
-[[bin]]
-name = "celestia_prover"
-path = "src/celestia_prover.rs"
+# [[bin]]
+# name = "settlement_verification"
+# path = "src/settlement_verification.rs"

@@ -54,7 +54,7 @@ impl CelestiaProver {
         Ok(Self { client, namespace })
     }
 
-    async fn get_shares_proof(
+    pub async fn get_shares_proof(
         &self,
         height: u64,
     ) -> Result<(SharesProof, u64, u64), Box<dyn Error>> {
@@ -84,7 +84,7 @@ impl CelestiaProver {
     }
 
     // Get data root tuple
-    async fn get_data_root_tuple(&self, height: u64) -> Result<DataRootTuple, Box<dyn Error>> {
+    pub async fn get_data_root_tuple(&self, height: u64) -> Result<DataRootTuple, Box<dyn Error>> {
         let header = self.client.header_get_by_height(height).await?;
         // Get the complete data root hash from DAH by hashing all row and column roots
         let Hash::Sha256(root) = header.dah.hash() else {
@@ -97,7 +97,7 @@ impl CelestiaProver {
     }
 
     // Get binary Merkle proof
-    async fn get_merkle_proof(&self, height: u64) -> Result<BinaryMerkleProof, Box<dyn Error>> {
+    pub async fn get_merkle_proof(&self, height: u64) -> Result<BinaryMerkleProof, Box<dyn Error>> {
         let header = self.client.header_get_by_height(height).await?;
         
         let namespace_data = self.client
@@ -140,23 +140,16 @@ impl CelestiaProver {
         &self,
         height: u64,
     ) -> Result<VerificationData, Box<dyn Error>> {
-        // Get all proofs in parallel using tokio::join!
-        let (shares_result, root_result, merkle_result) = tokio::join!(
-            self.get_shares_proof(height),
-            self.get_data_root_tuple(height),
-            self.get_merkle_proof(height)
-        );
-
-        let (shares_proof, start_index, data_len) = shares_result?;
-        let data_root_tuple = root_result?;
-        let binary_proof = merkle_result?;
+        let shares_proof = self.get_shares_proof(height).await?;
+        let data_root_tuple = self.get_data_root_tuple(height).await?;
+        let binary_proof = self.get_merkle_proof(height).await?;
 
         Ok(VerificationData {
-            shares_proof,
+            shares_proof: SharesProof { row_proofs: shares_proof.0.row_proofs },
             data_root_tuple,
             binary_proof,
-            start_index,
-            data_len,
+            start_index: shares_proof.1,
+            data_len: shares_proof.2,
         })
     }
 
@@ -184,7 +177,7 @@ impl CelestiaProver {
 }
 
 // Helper function from your existing code
-fn calculate_share_range(namespace_data: &NamespaceData) -> (u64, u64) {
+pub fn calculate_share_range(namespace_data: &NamespaceData) -> (u64, u64) {
     if namespace_data.rows.is_empty() {
         return (0, 0);
     }
